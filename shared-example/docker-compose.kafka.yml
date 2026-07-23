@@ -1,0 +1,51 @@
+# DEV setup — single Kafka broker using KRaft mode (no ZooKeeper needed)
+# Start: docker-compose -f docker-compose.kafka.yml up -d
+# Stop:  docker-compose -f docker-compose.kafka.yml down
+
+services:
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka-dev
+    restart: unless-stopped
+    ports:
+      - '9092:9092'    # host machine connects here (NestJS app)
+      - '29092:29092'  # kafka-ui (inside Docker) connects here
+      - '9093:9093'    # KRaft controller port
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # Two listeners: PLAINTEXT for host, INTERNAL for other containers
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_RETENTION_HOURS: 1
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qg'
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--list", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - '8080:8080'
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      # Use INTERNAL listener — kafka-ui lives inside Docker, not on the host
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  kafka_data:

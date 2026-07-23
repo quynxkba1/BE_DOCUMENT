@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// @@index = non-unique index
+// @unique = unique index (also creates an index automatically)
+// @@unique = composite unique index
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(255)
+  email     String   @unique @db.VarChar(255)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  orders Order[]
+
+  @@map("users")
+}
+
+model Order {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  status      String   @db.VarChar(50)
+  totalAmount Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt], name: "idx_orders_user_id_created_at")
+  @@index([status, createdAt], name: "idx_orders_status_created_at")
+
+  @@map("orders")
+}
+
+// ─── DEX Scanner ─────────────────────────────────────────────────────────────
+
+// Stores every swap event emitted by DEX smart contracts (Uniswap, PancakeSwap, etc.)
+// This table is the core of the DEX scanner — it grows by millions of rows per day.
+model SwapEvent {
+  id             BigInt   @id @default(autoincrement())
+  txHash         String   @db.VarChar(66)
+  blockNumber    BigInt
+  blockTimestamp DateTime
+  pairAddress    String   @db.VarChar(42) // the liquidity pool, e.g. USDC/ETH
+  tokenIn        String   @db.VarChar(42)
+  tokenOut       String   @db.VarChar(42)
+  amountIn       Decimal  @db.Decimal(38, 0)
+  amountOut      Decimal  @db.Decimal(38, 0)
+  price          Decimal  @db.Decimal(30, 18) // tokenOut per tokenIn
+  wallet         String   @db.VarChar(42)     // trader's address
+  logIndex       Int
+
+  // Dedup: prevents re-inserting the same on-chain event if the scanner restarts
+  @@unique([txHash, logIndex], name: "idx_swap_dedup")
+
+  // Hot read: latest price per pair — used by price ticker and charts
+  // pairAddress first (equality), blockTimestamp second (range + sort)
+  @@index([pairAddress, blockTimestamp(sort: Desc)], name: "idx_swap_pair_time")
+
+  // Hot read: trader's history page
+  @@index([wallet, blockTimestamp(sort: Desc)], name: "idx_swap_wallet_time")
+
+  // Scanner resume: find the highest block already indexed after a crash
+  @@index([blockNumber(sort: Desc)], name: "idx_swap_block_number")
+
+  @@map("swap_events")
+}
+
+// Tracks the scanner's progress per chain so it can resume after a crash.
+model ScannerCheckpoint {
+  chainId   Int      @id
+  lastBlock BigInt
+  updatedAt DateTime @updatedAt
+
+  @@map("scanner_checkpoints")
+}
