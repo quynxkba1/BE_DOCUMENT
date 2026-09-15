@@ -1,0 +1,39 @@
+# DEV setup — single-node Elasticsearch cluster (security disabled) + Kibana
+# Start: docker-compose -f docker-compose.elasticsearch.yml up -d
+# Stop:  docker-compose -f docker-compose.elasticsearch.yml down
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: elasticsearch-dev
+    restart: unless-stopped
+    ports:
+      - '9200:9200' # REST API — used by @elastic/elasticsearch client
+      - '9300:9300' # node-to-node transport (unused for a single node, kept for parity)
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: kibana-dev
+    restart: unless-stopped
+    ports:
+      - '5601:5601'
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  elasticsearch_data:

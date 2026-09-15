@@ -4,6 +4,6 @@ import { IndexingService } from './indexing.service';
 
 @Module({
   providers: [PrismaService, IndexingService],
-  exports: [IndexingService],
+  exports: [IndexingService, PrismaService],
 })
 export class IndexingModule {}

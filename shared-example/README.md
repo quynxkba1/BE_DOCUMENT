@@ -76,6 +76,72 @@ Use `RABBITMQ_URL` to point the app at a different broker:
 $ RABBITMQ_URL=amqp://localhost npm run start:dev
 ```
 
+## GraphQL API
+
+This project includes a code-first GraphQL API under `src/graphql-api`, built with `@nestjs/graphql` + Apollo Server, exposing the `User` and `Order` models from `prisma/schema.prisma`.
+
+Start the app, then open [http://localhost:3000/graphql](http://localhost:3000/graphql) for Apollo Sandbox, or query it directly:
+
+```bash
+$ curl -X POST http://localhost:3000/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"query { orders(status: \"paid\", limit: 5) { id status totalAmount user { name email } } }"}'
+```
+
+`User.orders` and `Order.user` are resolved on demand via `@ResolveField` in
+`UserResolver`/`OrderResolver` — only run when a query actually asks for that
+relation, unlike a SQL `JOIN` that always fetches it.
+
+### N+1 queries and DataLoader
+
+Resolving `orders { user { name } }` for a list of orders would normally fire
+one `SELECT` per order (the N+1 problem). `src/graphql-api/loaders.ts` builds
+a fresh `DataLoader` pair per request; `OrderResolver.user()` and
+`UserResolver.orders()` call `.load(id)` on them instead of querying Prisma
+directly, so N parents in one query still resolve with a single batched
+`findMany`.
+
+### Pagination
+
+`users` and `orders` both take `limit`/`offset` args (default `limit: 20,
+offset: 0`) so a query never returns an unbounded result set.
+
+### Query depth limiting
+
+`GraphqlApiModule` registers `graphql-depth-limit` as a validation rule
+(`depthLimit(5)`), rejecting queries nested more than 5 levels deep before
+they reach any resolver — a cheap guard against abusive/expensive queries.
+
+### Auth (demo)
+
+`createOrder` and `updateOrderStatus` require a bearer token; `createUser`
+and read queries stay open. Get a token via the `login` mutation (this is a
+simplified demo login — it just checks the email exists, no password):
+
+```graphql
+mutation {
+  createUser(input: { name: "Alice", email: "alice@example.com" }) {
+    id
+  }
+}
+
+mutation {
+  login(email: "alice@example.com") {
+    token
+  }
+}
+```
+
+```bash
+$ curl -X POST http://localhost:3000/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token from login>" \
+  -d '{"query":"mutation { createOrder(input: { status: \"pending\", totalAmount: 42.5 }) { id status } }"}'
+```
+
+`createOrder` always creates the order for the authenticated user (from the
+token), not whatever `userId` a client might try to pass in.
+
 ## Run tests
 
 ```bash
